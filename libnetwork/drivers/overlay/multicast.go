@@ -1114,7 +1114,7 @@ func (n *network) enableBridgeStormControl(sbox *osl.Namespace, brName string) e
 // addMulticastGroupForContainer is deprecated - use IGMP snooping instead
 // Kept for reference only
 func (n *network) addMulticastGroupForContainerDeprecated(groupIP netip.Addr, containerSubnet *subnet) error {
-	if \!groupIP.IsMulticast() {
+	if !groupIP.IsMulticast() {
 		return fmt.Errorf("IP %s is not a multicast address", groupIP)
 	}
 
@@ -1133,7 +1133,7 @@ func (n *network) addMulticastGroupForContainerDeprecated(groupIP netip.Addr, co
 		}
 
 		// Add FDB entry for this specific multicast group to this VTEP
-		if err := n.addMulticastFDBEntry(pEntry.vtep, groupMac, containerSubnet.vni); err \!= nil {
+		if err := n.addMulticastFDBEntry(pEntry.vtep, groupMac, containerSubnet.vni); err != nil {
 			log.G(context.TODO()).Warnf("Failed to add multicast FDB entry for group %s to VTEP %s: %v", 
 				groupIP, pEntry.vtep, err)
 		} else {
@@ -1144,12 +1144,12 @@ func (n *network) addMulticastGroupForContainerDeprecated(groupIP netip.Addr, co
 		return false
 	})
 
-	if err \!= nil {
+	if err != nil {
 		return fmt.Errorf("failed to walk peer DB for multicast group setup: %v", err)
 	}
 
 	// Also enable flooding for this multicast group on the bridge
-	if err := n.enableBridgeMulticastFlooding(containerSubnet, groupMac); err \!= nil {
+	if err := n.enableBridgeMulticastFlooding(containerSubnet, groupMac); err != nil {
 		log.G(context.TODO()).Warnf("Failed to enable bridge flooding for group %s: %v", groupIP, err)
 	}
 
@@ -1159,7 +1159,7 @@ func (n *network) addMulticastGroupForContainerDeprecated(groupIP netip.Addr, co
 // removeMulticastGroupForContainer is deprecated - use IGMP snooping instead
 // Kept for reference only
 func (n *network) removeMulticastGroupForContainerDeprecated(groupIP netip.Addr, containerSubnet *subnet) error {
-	if \!groupIP.IsMulticast() {
+	if !groupIP.IsMulticast() {
 		return fmt.Errorf("IP %s is not a multicast address", groupIP)
 	}
 
@@ -1178,7 +1178,7 @@ func (n *network) removeMulticastGroupForContainerDeprecated(groupIP netip.Addr,
 		}
 
 		// Remove FDB entry for this specific multicast group from this VTEP
-		if err := n.removeMulticastFDBEntryByVTEP(pEntry.vtep, groupMac, containerSubnet.vni); err \!= nil {
+		if err := n.removeMulticastFDBEntryByVTEP(pEntry.vtep, groupMac, containerSubnet.vni); err != nil {
 			log.G(context.TODO()).Warnf("Failed to remove multicast FDB entry for group %s from VTEP %s: %v", 
 				groupIP, pEntry.vtep, err)
 		} else {
@@ -1189,7 +1189,7 @@ func (n *network) removeMulticastGroupForContainerDeprecated(groupIP netip.Addr,
 		return false
 	})
 
-	if err \!= nil {
+	if err != nil {
 		return fmt.Errorf("failed to walk peer DB for multicast group cleanup: %v", err)
 	}
 
@@ -1199,12 +1199,12 @@ func (n *network) removeMulticastGroupForContainerDeprecated(groupIP netip.Addr,
 // removeMulticastFDBEntryByVTEP removes a specific FDB entry for a multicast group from a VTEP
 func (n *network) removeMulticastFDBEntryByVTEP(vtep netip.Addr, groupMac net.HardwareAddr, vni uint32) error {
 	for _, s := range n.subnets {
-		if s.vni \!= vni {
+		if s.vni != vni {
 			continue
 		}
 
 		vxlan, err := netlink.LinkByName(s.vxlanName)
-		if err \!= nil {
+		if err != nil {
 			return fmt.Errorf("failed to find vxlan interface %s: %v", s.vxlanName, err)
 		}
 
@@ -1217,7 +1217,7 @@ func (n *network) removeMulticastFDBEntryByVTEP(vtep netip.Addr, groupMac net.Ha
 			HardwareAddr: groupMac,
 		}
 
-		if err := ns.NlHandle().NeighDel(neigh); err \!= nil {
+		if err := ns.NlHandle().NeighDel(neigh); err != nil {
 			return fmt.Errorf("failed to delete FDB entry: %v", err)
 		}
 		break
@@ -1231,22 +1231,22 @@ func (n *network) enableBridgeMulticastFlooding(s *subnet, groupMac net.Hardware
 	// This ensures that multicast traffic is flooded to all ports on the bridge
 	// until IGMP group membership is properly established
 	vxlan, err := netlink.LinkByName(s.vxlanName)
-	if err \!= nil {
+	if err != nil {
 		return fmt.Errorf("failed to find vxlan interface %s: %v", s.vxlanName, err)
 	}
 
 	// Enable flooding for this multicast MAC on the VXLAN interface
-	if err := ns.NlHandle().LinkSetFlood(vxlan, true); err \!= nil {
+	if err := ns.NlHandle().LinkSetFlood(vxlan, true); err != nil {
 		log.G(context.TODO()).Debugf("Failed to enable flooding on VXLAN %s: %v", s.vxlanName, err)
 	}
 
 	return nil
 }
-EOF < /dev/null
+
 // handleMulticastGroupJoinForContainer is deprecated - use IGMP snooping instead
 // Kept for reference only
 func (n *network) handleMulticastGroupJoinForContainerDeprecated(containerIP netip.Addr, groupIP netip.Addr) error {
-	if \!groupIP.IsMulticast() {
+	if !groupIP.IsMulticast() {
 		return nil
 	}
 
@@ -1260,7 +1260,7 @@ func (n *network) handleMulticastGroupJoinForContainerDeprecated(containerIP net
 	log.G(context.TODO()).Infof("Container %s joined multicast group %s", containerIP, groupIP)
 
 	// Add FDB entries for this specific multicast group
-	return n.addMulticastGroupForContainer(groupIP, containerSubnet)
+	return n.addMulticastGroupForContainerDeprecated(groupIP, containerSubnet)
 }
 
 // proactiveMulticastSetup sets up multicast routes for common multicast groups
@@ -1283,7 +1283,7 @@ func (n *network) proactiveMulticastSetup() error {
 		for _, groupCIDR := range commonGroups {
 			if prefix, err := netip.ParsePrefix(groupCIDR); err == nil {
 				// Set up flooding for this range
-				if err := n.setupMulticastRangeFlooding(s, prefix); err \!= nil {
+				if err := n.setupMulticastRangeFlooding(s, prefix); err != nil {
 					log.G(context.TODO()).Warnf("Failed to setup flooding for range %s: %v", groupCIDR, err)
 				}
 			}
@@ -1296,12 +1296,12 @@ func (n *network) proactiveMulticastSetup() error {
 // setupMulticastRangeFlooding enables flooding for a range of multicast addresses
 func (n *network) setupMulticastRangeFlooding(s *subnet, groupRange netip.Prefix) error {
 	vxlan, err := netlink.LinkByName(s.vxlanName)
-	if err \!= nil {
+	if err != nil {
 		return fmt.Errorf("failed to find vxlan interface %s: %v", s.vxlanName, err)
 	}
 
 	// Enable flooding on the VXLAN interface for unknown multicast
-	if err := ns.NlHandle().LinkSetFlood(vxlan, true); err \!= nil {
+	if err := ns.NlHandle().LinkSetFlood(vxlan, true); err != nil {
 		log.G(context.TODO()).Debugf("Failed to enable flooding on VXLAN %s: %v", s.vxlanName, err)
 	}
 
@@ -1310,16 +1310,16 @@ func (n *network) setupMulticastRangeFlooding(s *subnet, groupRange netip.Prefix
 
 	return nil
 }
-EOF < /dev/null
+
 // handleSpecificMulticastGroup sets up FDB entries for a specific multicast group
 // This function can be called explicitly for testing or when specific groups are known
 func (n *network) handleSpecificMulticastGroup(groupIP string) error {
 	addr, err := netip.ParseAddr(groupIP)
-	if err \!= nil {
+	if err != nil {
 		return fmt.Errorf("invalid multicast IP %s: %v", groupIP, err)
 	}
 
-	if \!addr.IsMulticast() {
+	if !addr.IsMulticast() {
 		return fmt.Errorf("IP %s is not a multicast address", groupIP)
 	}
 
@@ -1327,7 +1327,7 @@ func (n *network) handleSpecificMulticastGroup(groupIP string) error {
 
 	// Set up FDB entries for all subnets
 	for _, s := range n.subnets {
-		if err := n.addMulticastGroupForContainer(addr, s); err \!= nil {
+		if err := n.addMulticastGroupForContainerDeprecated(addr, s); err != nil {
 			log.G(context.TODO()).Warnf("Failed to setup multicast group %s for subnet %s: %v", 
 				groupIP, s.subnetIP, err)
 		}
@@ -1335,4 +1335,3 @@ func (n *network) handleSpecificMulticastGroup(groupIP string) error {
 
 	return nil
 }
-EOF < /dev/null
