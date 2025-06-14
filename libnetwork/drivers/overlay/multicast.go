@@ -153,11 +153,9 @@ func (n *network) setupMulticastRouting(s *subnet) error {
 		return fmt.Errorf("failed to get vxlan interface attributes for %s", s.vxlanName)
 	}
 
-	// Instead of creating static routes with a hardcoded MAC, we'll set up
-	// the infrastructure for dynamic multicast group management.
-	// The actual FDB entries will be created when containers join specific groups.
-
-	log.G(context.TODO()).Infof("Multicast routing infrastructure setup complete for subnet %s", s.subnetIP.String())
+	// With peerdb-based group membership, we don't need to pre-populate FDB entries
+	// FDB entries will be created dynamically based on actual group membership
+	log.G(context.TODO()).Infof("Multicast routing ready for subnet %s - using dynamic group membership", s.subnetIP.String())
 	return nil
 }
 
@@ -279,6 +277,18 @@ func (n *network) initMulticast() error {
 		log.G(context.TODO()).Warnf("Failed to setup proactive multicast routes: %v", err)
 	}
 
+	// Start IGMP snooping if enabled
+	if n.multicastConfig != nil && n.multicastConfig.EnableSnooping {
+		if n.sbox != nil {
+			// Find the bridge name from the first subnet
+			if len(n.subnets) > 0 && n.subnets[0].brName != "" {
+				if err := n.startIGMPSnooping(n.sbox, n.subnets[0].brName); err != nil {
+					log.G(context.TODO()).Warnf("Failed to start IGMP snooping: %v", err)
+				}
+			}
+		}
+	}
+
 	// Return error if any critical operations failed
 	if len(initErrors) > 0 {
 		return fmt.Errorf("multicast initialization partially failed: %v", initErrors)
@@ -339,31 +349,53 @@ func (d *driver) peerAddMulticast(nid, eid string, peerIP netip.Prefix, vtep net
 		return nil
 	}
 
+	// For multicast addresses in peerdb, we're tracking group membership
+	// The peerIP here represents a multicast group that a remote peer has joined
+	// This is called when we receive gossip about remote peers joining groups
+	
 	n := d.network(nid)
 	if n == nil {
 		return fmt.Errorf("network %s not found", nid)
 	}
 
-	groupMac := multicastIPToMAC(peerIP.Addr())
-	if groupMac == nil {
-		return fmt.Errorf("failed to convert multicast IP %s to MAC", peerIP)
-	}
+	groupIP := peerIP.Addr()
+	log.G(context.TODO()).Infof("Remote peer %s on VTEP %s joined multicast group %s", eid, vtep, groupIP)
 
-	var addErrors []error
-	for _, s := range n.subnets {
-		if err := n.addMulticastFDBEntry(vtep, groupMac, s.vni); err != nil {
-			addErrors = append(addErrors, fmt.Errorf("subnet %s: %v", s.subnetIP, err))
-		}
-	}
-
-	if len(addErrors) > 0 {
-		return fmt.Errorf("failed to add multicast FDB entries: %v", addErrors)
+	// Update FDB for this group to include the new VTEP
+	if n.igmpSnooper != nil {
+		n.igmpSnooper.updateMulticastFDB(groupIP)
 	}
 
 	return nil
 }
 
 func (d *driver) peerDeleteMulticast(nid, eid string, peerIP netip.Prefix, vtep netip.Addr) error {
+	if !peerIP.Addr().IsMulticast() {
+		return nil
+	}
+
+	// For multicast addresses in peerdb, we're tracking group membership
+	// The peerIP here represents a multicast group that a remote peer has left
+	// This is called when we receive gossip about remote peers leaving groups
+	
+	n := d.network(nid)
+	if n == nil {
+		return fmt.Errorf("network %s not found", nid)
+	}
+
+	groupIP := peerIP.Addr()
+	log.G(context.TODO()).Infof("Remote peer %s on VTEP %s left multicast group %s", eid, vtep, groupIP)
+
+	// Update FDB for this group to potentially remove the VTEP
+	if n.igmpSnooper != nil {
+		n.igmpSnooper.updateMulticastFDB(groupIP)
+	}
+
+	return nil
+}
+
+// peerDeleteMulticastOld is the old implementation for reference
+func (d *driver) peerDeleteMulticastOld(nid, eid string, peerIP netip.Prefix, vtep netip.Addr) error {
 	if !peerIP.Addr().IsMulticast() {
 		return nil
 	}
@@ -1079,9 +1111,9 @@ func (n *network) enableBridgeStormControl(sbox *osl.Namespace, brName string) e
 	return invokeErr
 }
 
-// addMulticastGroupForContainer adds FDB entries for a specific multicast group
-// when a container joins the group
-func (n *network) addMulticastGroupForContainer(groupIP netip.Addr, containerSubnet *subnet) error {
+// addMulticastGroupForContainer is deprecated - use IGMP snooping instead
+// Kept for reference only
+func (n *network) addMulticastGroupForContainerDeprecated(groupIP netip.Addr, containerSubnet *subnet) error {
 	if \!groupIP.IsMulticast() {
 		return fmt.Errorf("IP %s is not a multicast address", groupIP)
 	}
@@ -1124,9 +1156,9 @@ func (n *network) addMulticastGroupForContainer(groupIP netip.Addr, containerSub
 	return nil
 }
 
-// removeMulticastGroupForContainer removes FDB entries for a specific multicast group
-// when a container leaves the group
-func (n *network) removeMulticastGroupForContainer(groupIP netip.Addr, containerSubnet *subnet) error {
+// removeMulticastGroupForContainer is deprecated - use IGMP snooping instead
+// Kept for reference only
+func (n *network) removeMulticastGroupForContainerDeprecated(groupIP netip.Addr, containerSubnet *subnet) error {
 	if \!groupIP.IsMulticast() {
 		return fmt.Errorf("IP %s is not a multicast address", groupIP)
 	}
@@ -1211,9 +1243,9 @@ func (n *network) enableBridgeMulticastFlooding(s *subnet, groupMac net.Hardware
 	return nil
 }
 EOF < /dev/null
-// handleMulticastGroupJoinForContainer automatically handles when a container joins a multicast group
-// This function should be called when the overlay network detects multicast traffic
-func (n *network) handleMulticastGroupJoinForContainer(containerIP netip.Addr, groupIP netip.Addr) error {
+// handleMulticastGroupJoinForContainer is deprecated - use IGMP snooping instead
+// Kept for reference only
+func (n *network) handleMulticastGroupJoinForContainerDeprecated(containerIP netip.Addr, groupIP netip.Addr) error {
 	if \!groupIP.IsMulticast() {
 		return nil
 	}

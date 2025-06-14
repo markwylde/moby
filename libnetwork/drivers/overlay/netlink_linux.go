@@ -170,35 +170,34 @@ func (n *network) handleMulticastMiss(s *subnet, dstIP netip.Addr, dstMAC net.Ha
 		return
 	}
 
-	err := n.driver.peerDbNetworkWalk(n.id, func(peerIP netip.Addr, peerMAC net.HardwareAddr, pEntry *peerEntry) bool {
-		if pEntry.isLocal {
-			return false
-		}
+	// With peerdb-based group membership, only add FDB entries for VTEPs that have group members
+	vteps := n.driver.peerDbGetMulticastMembers(n.id, dstIP)
+	if len(vteps) == 0 {
+		log.G(context.TODO()).Debugf("No members found for multicast group %s", dstIP)
+		return
+	}
 
-		vxlan, err := netlink.LinkByName(s.vxlanName)
-		if err != nil {
-			return false
-		}
+	vxlan, err := netlink.LinkByName(s.vxlanName)
+	if err != nil {
+		log.G(context.TODO()).Warnf("Failed to find vxlan interface %s: %v", s.vxlanName, err)
+		return
+	}
 
+	// Add FDB entries only for VTEPs with group members
+	for _, vtep := range vteps {
 		neigh := &netlink.Neigh{
 			LinkIndex:    vxlan.Attrs().Index,
 			Family:       syscall.AF_BRIDGE,
 			State:        netlink.NUD_PERMANENT,
 			Flags:        netlink.NTF_SELF,
-			IP:           pEntry.vtep.AsSlice(),
+			IP:           vtep.AsSlice(),
 			HardwareAddr: groupMAC,
 		}
 
 		if err := ns.NlHandle().NeighSet(neigh); err != nil {
-			log.G(context.TODO()).Debugf("Failed to add multicast FDB entry for VTEP %s: %v", pEntry.vtep, err)
+			log.G(context.TODO()).Debugf("Failed to add multicast FDB entry for VTEP %s: %v", vtep, err)
 		} else {
-			log.G(context.TODO()).Debugf("Added multicast FDB entry: MAC=%s VTEP=%s", groupMAC, pEntry.vtep)
+			log.G(context.TODO()).Debugf("Added multicast FDB entry for group %s: MAC=%s VTEP=%s", dstIP, groupMAC, vtep)
 		}
-
-		return false
-	})
-
-	if err != nil {
-		log.G(context.TODO()).Warnf("Failed to walk peer DB for multicast miss: %v", err)
 	}
 }

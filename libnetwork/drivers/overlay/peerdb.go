@@ -23,6 +23,8 @@ type peerEntry struct {
 	vtep       netip.Addr
 	prefixBits int // number of 1-bits in network mask of peerIP
 	isLocal    bool
+	// For multicast entries, this tracks group membership
+	multicastGroups map[netip.Addr]bool // set of multicast groups this peer has joined
 }
 
 type peerMap struct {
@@ -118,10 +120,11 @@ func (d *driver) peerDbAdd(nid, eid string, peerIP netip.Prefix, peerMac net.Har
 	pKey := ipmacOf(peerIP.Addr(), peerMac)
 
 	pEntry := peerEntry{
-		eid:        eid,
-		vtep:       vtep,
-		prefixBits: peerIP.Bits(),
-		isLocal:    isLocal,
+		eid:             eid,
+		vtep:            vtep,
+		prefixBits:      peerIP.Bits(),
+		isLocal:         isLocal,
+		multicastGroups: make(map[netip.Addr]bool),
 	}
 
 	pMap.Lock()
@@ -147,10 +150,11 @@ func (d *driver) peerDbDelete(nid, eid string, peerIP netip.Prefix, peerMac net.
 	pKey := ipmacOf(peerIP.Addr(), peerMac)
 
 	pEntry := peerEntry{
-		eid:        eid,
-		vtep:       vtep,
-		prefixBits: peerIP.Bits(),
-		isLocal:    isLocal,
+		eid:             eid,
+		vtep:            vtep,
+		prefixBits:      peerIP.Bits(),
+		isLocal:         isLocal,
+		multicastGroups: make(map[netip.Addr]bool),
 	}
 
 	pMap.Lock()
@@ -383,4 +387,153 @@ func (d *driver) peerDBUpdateSelf() {
 		}
 		return false
 	})
+}
+
+// peerDbJoinMulticastGroup adds a multicast group membership for a peer
+func (d *driver) peerDbJoinMulticastGroup(nid, eid string, peerIP netip.Addr, groupIP netip.Addr) error {
+	if !groupIP.IsMulticast() {
+		return fmt.Errorf("IP %s is not a multicast address", groupIP)
+	}
+
+	d.peerDb.Lock()
+	pMap, ok := d.peerDb.mp[nid]
+	d.peerDb.Unlock()
+
+	if !ok {
+		return fmt.Errorf("network %s not found in peerdb", nid)
+	}
+
+	// Find the peer entry
+	pMap.Lock()
+	defer pMap.Unlock()
+
+	found := false
+	// Iterate through all keys to find the peer
+	for _, key := range pMap.mp.Keys() {
+		if key.ip == peerIP {
+			entryList, ok := pMap.mp.Get(key)
+			if ok {
+				// Find and update the entry
+				for _, entry := range entryList {
+					if entry.eid == eid {
+						// Remove old entry
+						pMap.mp.Remove(key, entry)
+						
+						// Update multicast groups
+						if entry.multicastGroups == nil {
+							entry.multicastGroups = make(map[netip.Addr]bool)
+						}
+						entry.multicastGroups[groupIP] = true
+						
+						// Re-insert updated entry
+						pMap.mp.Insert(key, entry)
+						
+						found = true
+						log.G(context.TODO()).Infof("Peer %s/%s joined multicast group %s", eid, peerIP, groupIP)
+						break
+					}
+				}
+			}
+			break
+		}
+	}
+
+	if !found {
+		return fmt.Errorf("peer %s/%s not found in network %s", eid, peerIP, nid)
+	}
+
+	return nil
+}
+
+// peerDbLeaveMulticastGroup removes a multicast group membership for a peer
+func (d *driver) peerDbLeaveMulticastGroup(nid, eid string, peerIP netip.Addr, groupIP netip.Addr) error {
+	if !groupIP.IsMulticast() {
+		return fmt.Errorf("IP %s is not a multicast address", groupIP)
+	}
+
+	d.peerDb.Lock()
+	pMap, ok := d.peerDb.mp[nid]
+	d.peerDb.Unlock()
+
+	if !ok {
+		return fmt.Errorf("network %s not found in peerdb", nid)
+	}
+
+	// Find the peer entry
+	pMap.Lock()
+	defer pMap.Unlock()
+
+	found := false
+	// Iterate through all keys to find the peer
+	for _, key := range pMap.mp.Keys() {
+		if key.ip == peerIP {
+			entryList, ok := pMap.mp.Get(key)
+			if ok {
+				// Find and update the entry
+				for _, entry := range entryList {
+					if entry.eid == eid {
+						if entry.multicastGroups != nil {
+							// Remove old entry
+							pMap.mp.Remove(key, entry)
+							
+							// Update multicast groups
+							delete(entry.multicastGroups, groupIP)
+							
+							// Re-insert updated entry
+							pMap.mp.Insert(key, entry)
+							
+							found = true
+							log.G(context.TODO()).Infof("Peer %s/%s left multicast group %s", eid, peerIP, groupIP)
+						}
+						break
+					}
+				}
+			}
+			break
+		}
+	}
+
+	if !found {
+		return fmt.Errorf("peer %s/%s not found in network %s", eid, peerIP, nid)
+	}
+
+	return nil
+}
+
+// peerDbGetMulticastMembers returns all VTEPs that have members for a specific multicast group
+func (d *driver) peerDbGetMulticastMembers(nid string, groupIP netip.Addr) []netip.Addr {
+	if !groupIP.IsMulticast() {
+		return nil
+	}
+
+	d.peerDb.Lock()
+	pMap, ok := d.peerDb.mp[nid]
+	d.peerDb.Unlock()
+
+	if !ok {
+		return nil
+	}
+
+	vteps := make(map[netip.Addr]bool)
+	pMap.Lock()
+	defer pMap.Unlock()
+
+	// Iterate through all keys
+	for _, key := range pMap.mp.Keys() {
+		entryList, ok := pMap.mp.Get(key)
+		if ok {
+			for _, entry := range entryList {
+				if entry.multicastGroups != nil && entry.multicastGroups[groupIP] {
+					vteps[entry.vtep] = true
+				}
+			}
+		}
+	}
+
+	result := make([]netip.Addr, 0, len(vteps))
+	for vtep := range vteps {
+		result = append(result, vtep)
+	}
+
+	return result
 }

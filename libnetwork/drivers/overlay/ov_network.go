@@ -65,6 +65,7 @@ type network struct {
 	netlinkMonitor       interface{}           // Will be *netlinkMonitor from netlink_linux.go
 	multicastConfig      *MulticastConfig      // Multicast configuration
 	multicastRateLimiter *multicastRateLimiter // Rate limiter for multicast traffic
+	igmpSnooper          *igmpSnooper          // IGMP snooper for multicast group tracking
 	sync.Mutex
 }
 
